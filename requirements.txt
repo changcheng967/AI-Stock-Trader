@@ -1,29 +1,18 @@
-# Core dependencies (Auto-fetches 2026 stable versions)
+# Modern replacements for 2026
 streamlit
 pandas
 numpy<2.0.0
 plotly
-
-# Alpaca API (Modern SDKs)
 alpaca-py
-alpaca-trade-api
-
-# Data & Analysis (Crucial Fix for your Error)
-yfinance
+yfinance>=0.2.35
 pandas-ta-classic
-
-# Logging
 loguru
-
-# Config
 python-dotenv
 pydantic-settings
-
-# HTTP & Utilities
 requests
 schedule
-
-# AI & Timezone
 openai
 pytz
 python-dateutil
+# Fix for the PyYAML error
+PyYAML>=6.0.1
