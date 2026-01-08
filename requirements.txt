@@ -1,16 +1,16 @@
-# Core dependencies
-streamlit>=1.28.0
-pandas>=2.0.0
-numpy>=1.24.0
-plotly>=5.17.0
+# Core dependencies (Auto-fetches 2026 stable versions)
+streamlit
+pandas
+numpy<2.0.0
+plotly
 
-# Alpaca API
+# Alpaca API (Modern SDKs)
 alpaca-py
 alpaca-trade-api
 
-# Data & Analysis
+# Data & Analysis (Crucial Fix for your Error)
 yfinance
-pandas-ta>=0.3.14b0
+pandas-ta-classic
 
 # Logging
 loguru
@@ -23,9 +23,7 @@ pydantic-settings
 requests
 schedule
 
-# NVIDIA NIM (optional)
-openai>=1.0.0
-
-# Timezone
-pytz>=2023.3
-python-dateutil>=2.8.0
+# AI & Timezone
+openai
+pytz
+python-dateutil
