@@ -11,8 +11,20 @@ from loguru import logger
 
 
 def clear_screen():
-    """Clear the terminal screen."""
-    os.system('cls' if os.name == 'nt' else 'clear')
+    """Clear the terminal screen safely."""
+    try:
+        if os.name == 'nt':  # Windows
+            os.system('cls')
+        else:  # Unix/Linux/Mac
+            # Check if TERM is set, otherwise use clear with fallback
+            if os.environ.get('TERM'):
+                os.system('clear')
+            else:
+                # Fallback: print newlines to clear screen
+                print('\n' * 100)
+    except Exception:
+        # Ultimate fallback: just print some newlines
+        print('\n' * 5)
 
 
 class MonitoringDashboard:
