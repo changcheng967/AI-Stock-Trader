@@ -1,42 +1,42 @@
 name: 🔄 Continuous Trading Bot (Market Hours)
 
-# Advanced workflow that runs continuously during market hours
-# Uses workflow restart to bypass the 6-hour job limit
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
     inputs:
       duration_hours:
         description: 'How long to run (hours, max 6)'
         required: true
         default: '6'
         type: choice
-        options:
-          - '1'
-          - '2'
-          - '3'
-          - '4'
-          - '5'
-          - '6'
+        options: ['1', '2', '3', '4', '5', '6']
+      is_recursive:
+        description: 'Restart after completion?'
+        type: boolean
+        default: false
 
   schedule:
-    # Start at market open (9:30 AM ET = 13:30 UTC during EDT, 14:30 UTC during EST)
-    # This example uses 14:30 UTC (assuming EST)
-    - cron: '30 14 * * 1-5'  # 9:30 AM ET, Mon-Fri
+    - cron: '30 14 * * 1-5' # 9:30 AM ET (EST)
 
 env:
   PYTHON_VERSION: '3.12'
+  # Global Env for the whole Job
+  ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+  ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+  ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets' }}
+  ALPACA_DATA_URL: ${{ secrets.ALPACA_DATA_URL || 'https://data.alpaca.markets' }}
+  NIM_API_KEY: ${{ secrets.NIM_API_KEY }}
 
 jobs:
   continuous-trading:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max
+    timeout-minutes: 360
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Upgraded to v5 for better stability
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
@@ -46,104 +46,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🔐 Load Environment
-        run: |
-          echo "ALPACA_API_KEY=${{ secrets.ALPACA_API_KEY }}" >> .env
-          echo "ALPACA_SECRET_KEY=${{ secrets.ALPACA_SECRET_KEY }}" >> .env
-          echo "ALPACA_BASE_URL=${{ secrets.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets' }}" >> .env
-          echo "ALPACA_DATA_URL=${{ secrets.ALPACA_DATA_URL || 'https://data.alpaca.markets' }}" >> .env
-          if [ -n "${{ secrets.NIM_API_KEY }}" ]; then
-            echo "NIM_API_KEY=${{ secrets.NIM_API_KEY }}" >> .env
-          fi
-
       - name: 🧪 Validate Setup
         run: |
           python -c "
-          import os
           from alpaca_client import AlpacaClient
-          from dotenv import load_dotenv
-
-          load_dotenv()
           print('✅ Testing Alpaca connection...')
-
           client = AlpacaClient()
           account = client.get_account()
-
-          print(f'✅ Connected successfully!')
-          print(f'   Account: ${account[\"portfolio_value\"]:,.2f}')
-          print(f'   Cash: ${account[\"cash\"]:,.2f}')
-          print(f'   Buying Power: ${account[\"buying_power\"]:,.2f}')
-          print(f'   Mode: Paper Trading')
+          print(f'✅ Connected! Portfolio: ${account[\"portfolio_value\"]}')
           "
 
       - name: 🤖 Run Trading Bot
-        env:
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-          ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets' }}
-          ALPACA_DATA_URL: ${{ secrets.ALPACA_DATA_URL || 'https://data.alpaca.markets' }}
-          NIM_API_KEY: ${{ secrets.NIM_API_KEY || '' }}
         run: |
-          # Calculate run time in minutes
-          DURATION_MINUTES=$((${{ inputs.duration_hours || 6 }} * 60 - 5))  # 5 min buffer
+          DURATION_MINUTES=$((${{ inputs.duration_hours || 6 }} * 60 - 10)) 
           echo "⏰ Running for $DURATION_MINUTES minutes"
-
-          # Create logs directory
           mkdir -p logs
-
-          # Run bot
-          timeout ${DURATION_MINUTES}m python run_bot.py 2>&1 | tee logs/bot.log
-
-          echo ""
-          echo "✅ Bot run completed"
+          # Use timeout to ensure we exit before the GitHub 6h hard-cap
+          timeout ${DURATION_MINUTES}m python run_bot.py 2>&1 | tee logs/bot.log || echo 'Bot stopped by timeout'
 
       - name: 📊 Process & Upload Logs
         if: always()
-        run: |
-          # Create summary
-          echo "# Trading Bot Run Summary" > logs/SUMMARY.md
-          echo "" >> logs/SUMMARY.md
-          echo "**Run ID:** ${{ github.run_id }}" >> logs/SUMMARY.md
-          echo "**Duration:** ${{ inputs.duration_hours || 6 }} hours" >> logs/SUMMARY.md
-          echo "**Date:** $(date -u)" >> logs/SUMMARY.md
-          echo "" >> logs/SUMMARY.md
-
-          # Extract key metrics from logs
-          echo "## Key Metrics" >> logs/SUMMARY.md
-          grep -E "Portfolio:|Total Trades:|Win Rate:|P&L:" logs/bot.log | tail -20 >> logs/SUMMARY.md || echo "No metrics found"
-
-      - name: 📤 Upload Logs
-        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: continuous-bot-logs-${{ github.run_number }}
-          path: logs/
-          retention-days: 30
+          name: bot-logs-run-${{ github.run_number }}
+          path: |
+            logs/
+            data/
+          retention-days: 7
 
-      - name: 📈 Upload Performance Data
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: continuous-performance-${{ github.run_number }}
-          path: data/
-          retention-days: 90
-          if-no-files-found: ignore
-
-      - name: 🎯 Create Summary
-        if: always()
+      # RESTART LOGIC: This allows the bot to "loop"
+      - name: 🔄 Chain-Restart Workflow
+        if: github.event.inputs.is_recursive == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=========================================="
-          echo "🔄 CONTINUOUS TRADING BOT - COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "📊 Run Details:"
-          echo "  Duration: ${{ inputs.duration_hours || 6 }} hours"
-          echo "  Status: ${{ job.status }}"
-          echo ""
-          echo "📦 Artifacts:"
-          echo "  - continuous-bot-logs-${{ github.run_number }}"
-          echo "  - continuous-performance-${{ github.run_number }}"
-          echo ""
-          echo "🔗 View Details:"
-          echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "=========================================="
+          echo "Triggering next cycle..."
+          gh workflow run "Continuous Trading Bot (Market Hours)" \
+            -f duration_hours="${{ github.event.inputs.duration_hours }}" \
+            -f is_recursive="true"
