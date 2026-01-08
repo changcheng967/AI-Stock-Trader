@@ -19,7 +19,6 @@ on:
 
 env:
   PYTHON_VERSION: '3.12'
-  # Global Env for the whole Job
   ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
   ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
   ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets' }}
@@ -36,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v5 # Upgraded to v5 for better stability
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
@@ -44,43 +43,66 @@ jobs:
       - name: 📦 Install Dependencies
         run: |
           python -m pip install --upgrade pip
+          # Using "numpy<2" is recommended here if your requirements.txt is still using older Pandas
           pip install -r requirements.txt
 
       - name: 🧪 Validate Setup
         run: |
-          python -c "
+          python <<EOF
+          import os
           from alpaca_client import AlpacaClient
-          print('✅ Testing Alpaca connection...')
-          client = AlpacaClient()
-          account = client.get_account()
-          print(f'✅ Connected! Portfolio: ${account[\"portfolio_value\"]}')
-          "
+          
+          print('🔌 Testing Alpaca connection...')
+          try:
+              client = AlpacaClient()
+              account = client.get_account()
+              
+              portfolio = account.get('portfolio_value', '0.00')
+              buying_power = account.get('buying_power', '0.00')
+              
+              print(f'✅ Connected Successfully!')
+              print(f'   Portfolio Value: ${portfolio}')
+              print(f'   Buying Power:    ${buying_power}')
+          except Exception as e:
+              print(f'❌ Setup Validation Failed: {e}')
+              exit(1)
+          EOF
 
       - name: 🤖 Run Trading Bot
         run: |
-          DURATION_MINUTES=$((${{ inputs.duration_hours || 6 }} * 60 - 10)) 
-          echo "⏰ Running for $DURATION_MINUTES minutes"
+          # Calculate minutes: (Hours * 60) - 10 min buffer for cleanup
+          DURATION_MINUTES=$((${{ github.event.inputs.duration_hours || 6 }} * 60 - 10))
+          echo "⏰ Bot scheduled to run for $DURATION_MINUTES minutes"
+          
           mkdir -p logs
-          # Use timeout to ensure we exit before the GitHub 6h hard-cap
-          timeout ${DURATION_MINUTES}m python run_bot.py 2>&1 | tee logs/bot.log || echo 'Bot stopped by timeout'
+          
+          # Use timeout to prevent the job from being killed abruptly by GitHub
+          # This allows the workflow to move to the 'Upload Logs' step even after bot stops
+          timeout ${DURATION_MINUTES}m python run_bot.py 2>&1 | tee logs/bot.log || echo "Bot process reached timeout or ended."
 
-      - name: 📊 Process & Upload Logs
+      - name: 📤 Upload Logs & Data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bot-logs-run-${{ github.run_number }}
+          name: trading-artifacts-run-${{ github.run_number }}
           path: |
             logs/
             data/
           retention-days: 7
 
-      # RESTART LOGIC: This allows the bot to "loop"
       - name: 🔄 Chain-Restart Workflow
         if: github.event.inputs.is_recursive == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next cycle..."
+          echo "🔄 Recursive mode enabled. Triggering next cycle..."
           gh workflow run "Continuous Trading Bot (Market Hours)" \
             -f duration_hours="${{ github.event.inputs.duration_hours }}" \
             -f is_recursive="true"
+
+      - name: 🎯 Final Summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "🏁 Run ID: ${{ github.run_id }} Status: ${{ job.status }}"
+          echo "=========================================="
