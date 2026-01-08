@@ -1,0 +1,31 @@
+# Core dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.17.0
+
+# Alpaca API
+alpaca-py
+alpaca-trade-api
+
+# Data & Analysis
+yfinance
+pandas-ta>=0.3.14b0
+
+# Logging
+loguru
+
+# Config
+python-dotenv
+pydantic-settings
+
+# HTTP & Utilities
+requests
+schedule
+
+# NVIDIA NIM (optional)
+openai>=1.0.0
+
+# Timezone
+pytz>=2023.3
+python-dateutil>=2.8.0
